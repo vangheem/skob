@@ -1,4 +1,4 @@
-.PHONY: help run run-reader run-writer run-s3 build test up down logs rustfs psql
+.PHONY: help run run-reader run-writer run-s3 build test e2e bench up down logs rustfs psql
 
 SKOB_DB ?= p1
 
@@ -9,7 +9,9 @@ help:
 		'run-writer   serve the write plane on :8081' \
 		'run-s3       serve locally against RustFS on :9000' \
 		'build        build the skob binary' \
-		'test         run crate tests' \
+		'test         run crate tests, including the multi-node cluster' \
+		'e2e          raft cluster: 3 writers, 2 readers, leader loss' \
+		'bench        write/read throughput and failover on a local cluster' \
 		'up           docker compose up --build' \
 		'down         docker compose down' \
 		'logs         follow the skob compose logs' \
@@ -40,6 +42,12 @@ build:
 
 test:
 	cargo test -p skob-core -p skob-storage -p skob-index -p skob-raft -p skob-server
+
+e2e:
+	cargo test -p skob-server --test cluster -- --test-threads=1 --nocapture
+
+bench:
+	cargo run -p skob-server --bin skob-bench --release
 
 up:
 	docker compose up --build

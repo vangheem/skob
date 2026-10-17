@@ -79,6 +79,10 @@ struct ServeArgs {
     /// Do not listen for PostgreSQL clients.
     #[arg(long, env = "SKOB_PG_DISABLE", default_value_t = false)]
     pg_disable: bool,
+
+    /// Join an existing writer instead of bootstrapping a one-node Raft group.
+    #[arg(long, env = "SKOB_RAFT_JOIN")]
+    raft_join: Option<String>,
 }
 
 #[tokio::main]
@@ -119,8 +123,9 @@ async fn run(cli: Cli) -> skob_core::Result<()> {
         s3_secret_key: args.s3_secret_key,
         s3_path_style: args.s3_path_style,
         segment_count: args.segment_count,
+        raft_join: args.raft_join.clone(),
     })
     .await?;
     let pg_bind = (!args.pg_disable && !args.pg_bind.is_empty()).then_some(args.pg_bind.as_str());
-    serve(state, &args.bind, pg_bind).await
+    serve(state, &args.bind, pg_bind, args.raft_join.as_deref()).await
 }

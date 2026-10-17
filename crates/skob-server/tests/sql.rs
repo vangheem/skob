@@ -141,12 +141,7 @@ async fn app() -> (Arc<AppState>, std::path::PathBuf) {
 
     let index = skob_index::IndexManager::open(blob.clone(), root.join("indexes"), false).expect("index");
     index.start();
-    let raft = SegmentCoordinator::bootstrap(RaftConfig {
-        node_id: 1,
-        advertise_addr: "http://127.0.0.1:8080".into(),
-        data_dir: root.join("raft"),
-        segment_count: 16,
-    })
+    let raft = SegmentCoordinator::bootstrap(RaftConfig::new(1, "http://127.0.0.1:8080", root.join("raft"), 16))
     .await
     .expect("raft");
     (

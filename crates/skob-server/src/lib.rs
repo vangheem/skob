@@ -1,5 +1,6 @@
 //! HTTP read and write routers for the `skob` process.
 
+pub mod cluster;
 mod error;
 mod pg;
 mod read;
@@ -58,6 +59,8 @@ pub struct ServeConfig {
     pub s3_secret_key: Option<String>,
     pub s3_path_style: bool,
     pub segment_count: u32,
+    /// Leader advertise address. When set, this writer joins that cluster instead of bootstrapping.
+    pub raft_join: Option<String>,
 }
 
 /// Open blob storage, start the index worker, and join Raft when this role writes.
@@ -70,13 +73,19 @@ pub async fn build(config: ServeConfig) -> Result<Arc<AppState>> {
     index.start();
     let raft = if config.role.serves_writes() {
         Some(
-            SegmentCoordinator::bootstrap(RaftConfig {
-                node_id: config.node_id,
-                advertise_addr: config.advertise.clone(),
-                data_dir: config.data_dir.join("raft"),
-                segment_count: config.segment_count,
-            })
-            .await?,
+            {
+                let raft_config = RaftConfig::new(
+                    config.node_id,
+                    config.advertise.clone(),
+                    config.data_dir.join("raft"),
+                    config.segment_count,
+                );
+                if config.raft_join.is_some() {
+                    SegmentCoordinator::standby(raft_config).await?
+                } else {
+                    SegmentCoordinator::bootstrap(raft_config).await?
+                }
+            }
         )
     } else {
         None
@@ -138,7 +147,12 @@ pub fn router(state: Arc<AppState>) -> Router {
 }
 
 /// Bind the HTTP API and, unless disabled, the PostgreSQL wire listener.
-pub async fn serve(state: Arc<AppState>, bind: &str, pg_bind: Option<&str>) -> Result<()> {
+pub async fn serve(
+    state: Arc<AppState>,
+    bind: &str,
+    pg_bind: Option<&str>,
+    raft_join: Option<&str>,
+) -> Result<()> {
     if let Some(pg_bind) = pg_bind {
         let listener = tokio::net::TcpListener::bind(pg_bind).await.map_err(SkobError::storage)?;
         let pg_state = state.clone();
@@ -151,9 +165,49 @@ pub async fn serve(state: Arc<AppState>, bind: &str, pg_bind: Option<&str>) -> R
     }
     let listener = tokio::net::TcpListener::bind(bind).await.map_err(SkobError::storage)?;
     tracing::info!(%bind, role = state.role.as_str(), "skob listening");
+    if let Some(leader) = raft_join {
+        let app = router(state.clone());
+        let server = tokio::spawn(async move {
+            axum::serve(listener, app).await.map_err(SkobError::storage)
+        });
+        if let Err(err) = join_leader(&state, leader).await {
+            server.abort();
+            return Err(err);
+        }
+        return server.await.map_err(|err| SkobError::storage(err))?;
+    }
     axum::serve(listener, router(state))
         .await
         .map_err(SkobError::storage)?;
+    Ok(())
+}
+
+async fn join_leader(state: &AppState, leader: &str) -> Result<()> {
+    let raft = state
+        .raft
+        .as_ref()
+        .ok_or_else(|| SkobError::BadRequest("raft join requires a writer".into()))?;
+    let body = serde_json::json!({
+        "node_id": raft.node_id(),
+        "advertise_addr": raft.advertise_addr(),
+    });
+    let url = format!("{}/v1/raft/join", leader.trim_end_matches('/'));
+    let response = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(30))
+        .no_proxy()
+        .build()
+        .map_err(SkobError::raft)?
+        .post(url)
+        .json(&body)
+        .send()
+        .await
+        .map_err(SkobError::raft)?;
+    if !response.status().is_success() {
+        let status = response.status();
+        let text = response.text().await.unwrap_or_default();
+        return Err(SkobError::raft(format!("join failed: {status} {text}")));
+    }
+    tracing::info!(leader, node_id = raft.node_id(), "joined raft cluster");
     Ok(())
 }
 

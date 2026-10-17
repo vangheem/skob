@@ -5,6 +5,7 @@ use axum::extract::Query;
 use axum::extract::State;
 use axum::http::HeaderMap;
 use axum::http::StatusCode;
+use axum::response::IntoResponse;
 use axum::routing::delete;
 use axum::routing::get;
 use axum::routing::post;
@@ -13,6 +14,7 @@ use axum::Json;
 use axum::Router;
 use bytes::Bytes;
 use chrono::Utc;
+use serde::Deserialize;
 use serde_json::json;
 use serde_json::Value;
 use skob_core::collection_meta_key;
@@ -63,14 +65,60 @@ pub fn router() -> Router<Arc<AppState>> {
             delete(delete_index),
         )
         .route("/v1/raft/metrics", get(raft_metrics))
+        .route("/v1/raft/join", post(join_voter))
+        .route("/v1/raft/rebalance", post(rebalance))
+        .route("/internal/raft/append", post(raft_append))
+        .route("/internal/raft/vote", post(raft_vote))
+        .route("/internal/raft/snapshot", post(raft_snapshot))
 }
 
 async fn raft_metrics(State(state): State<Arc<AppState>>) -> Result<Json<Value>, ApiError> {
-    let raft = state
+    Ok(Json(raft_of(&state)?.metrics_json().await))
+}
+
+#[derive(Deserialize)]
+struct JoinBody {
+    node_id: u64,
+    advertise_addr: String,
+}
+
+async fn join_voter(State(state): State<Arc<AppState>>, Json(body): Json<JoinBody>) -> Result<Json<Value>, ApiError> {
+    let raft = raft_of(&state)?;
+    raft.add_voter(body.node_id, body.advertise_addr).await?;
+    raft.rebalance().await?;
+    Ok(Json(raft.metrics_json().await))
+}
+
+async fn rebalance(State(state): State<Arc<AppState>>) -> Result<Json<Value>, ApiError> {
+    let raft = raft_of(&state)?;
+    raft.rebalance().await?;
+    Ok(Json(raft.metrics_json().await))
+}
+
+async fn raft_append(State(state): State<Arc<AppState>>, body: Bytes) -> Result<impl IntoResponse, ApiError> {
+    raft_bytes(raft_of(&state)?.handle_append(&body).await?)
+}
+
+async fn raft_vote(State(state): State<Arc<AppState>>, body: Bytes) -> Result<impl IntoResponse, ApiError> {
+    raft_bytes(raft_of(&state)?.handle_vote(&body).await?)
+}
+
+async fn raft_snapshot(State(state): State<Arc<AppState>>, body: Bytes) -> Result<impl IntoResponse, ApiError> {
+    raft_bytes(raft_of(&state)?.handle_snapshot(&body).await?)
+}
+
+fn raft_bytes(body: Vec<u8>) -> Result<impl IntoResponse, ApiError> {
+    Ok((
+        [(axum::http::header::CONTENT_TYPE, "application/json")],
+        body,
+    ))
+}
+
+fn raft_of(state: &AppState) -> Result<&Arc<skob_raft::SegmentCoordinator>, ApiError> {
+    state
         .raft
         .as_ref()
-        .ok_or_else(|| SkobError::raft("writer is not joined to raft"))?;
-    Ok(Json(raft.metrics_json().await))
+        .ok_or_else(|| SkobError::raft("writer is not joined to raft").into())
 }
 
 async fn create_project(
