@@ -1,0 +1,70 @@
+services:
+  volume-permission-helper:
+    image: alpine:3.20
+    volumes:
+      - rustfs_data_0:/data/rustfs0
+      - rustfs_data_1:/data/rustfs1
+      - rustfs_data_2:/data/rustfs2
+      - rustfs_data_3:/data/rustfs3
+      - rustfs_logs:/app/logs
+    command: >
+      sh -c "chown -R 10001:10001 /data/rustfs0 /data/rustfs1 /data/rustfs2 /data/rustfs3 /app/logs
+      && echo 'Volume permissions fixed'"
+    restart: "no"
+
+  rustfs:
+    image: rustfs/rustfs:latest
+    depends_on:
+      volume-permission-helper:
+        condition: service_completed_successfully
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    environment:
+      RUSTFS_VOLUMES: /data/rustfs{0...3}
+      RUSTFS_ADDRESS: 0.0.0.0:9000
+      RUSTFS_CONSOLE_ADDRESS: 0.0.0.0:9001
+      RUSTFS_CONSOLE_ENABLE: "true"
+      RUSTFS_ACCESS_KEY: rustfsadmin
+      RUSTFS_SECRET_KEY: rustfsadmin
+      RUSTFS_OBS_LOG_DIRECTORY: /app/logs
+    volumes:
+      - rustfs_data_0:/data/rustfs0
+      - rustfs_data_1:/data/rustfs1
+      - rustfs_data_2:/data/rustfs2
+      - rustfs_data_3:/data/rustfs3
+      - rustfs_logs:/app/logs
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:9000/health"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 10s
+    restart: unless-stopped
+
+  skob:
+    build: .
+    ports:
+      - "8080:8080"
+      - "5432:5432"
+    depends_on:
+      rustfs:
+        condition: service_healthy
+    environment:
+      SKOB_ROLE: all
+      SKOB_BLOB: s3
+      SKOB_S3_ENDPOINT: http://rustfs:9000
+      SKOB_S3_BUCKET: skob
+      SKOB_S3_REGION: us-east-1
+      SKOB_S3_ACCESS_KEY: rustfsadmin
+      SKOB_S3_SECRET_KEY: rustfsadmin
+      SKOB_S3_PATH_STYLE: "true"
+      SKOB_ADVERTISE: http://skob:8080
+    restart: unless-stopped
+
+volumes:
+  rustfs_data_0:
+  rustfs_data_1:
+  rustfs_data_2:
+  rustfs_data_3:
+  rustfs_logs:

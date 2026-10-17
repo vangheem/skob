@@ -1,0 +1,23 @@
+[package]
+name = "skob-index"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+async-trait.workspace = true
+bytes.workspace = true
+chrono.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+skob-core.workspace = true
+tantivy = "0.27"
+tokio.workspace = true
+tracing.workspace = true
+
+[dev-dependencies]
+chrono.workspace = true
+serde_json.workspace = true
+skob-core.workspace = true
+tokio = { version = "1", features = ["full"] }

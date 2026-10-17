@@ -1,0 +1,37 @@
+[package]
+name = "skob-server"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[[bin]]
+name = "skob"
+path = "src/main.rs"
+
+[dependencies]
+async-trait.workspace = true
+axum = "0.8"
+bytes.workspace = true
+chrono.workspace = true
+clap = { version = "4", features = ["derive", "env"] }
+futures = "0.3"
+http-body-util = "0.1"
+pgwire = "0.41"
+serde.workspace = true
+serde_json.workspace = true
+skob-core.workspace = true
+skob-index.workspace = true
+skob-raft.workspace = true
+skob-storage.workspace = true
+tokio.workspace = true
+tower = { version = "0.5", features = ["util"] }
+tower-http = { version = "0.6", features = ["trace"] }
+tracing.workspace = true
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+[dev-dependencies]
+tokio = { version = "1", features = ["full"] }
+tokio-postgres = "0.7"
+tower = { version = "0.5", features = ["util"] }
+http-body-util = "0.1"
