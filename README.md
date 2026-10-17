@@ -13,8 +13,10 @@ Writers use Raft only to decide which node owns a write segment. Object bytes go
 ## Run
 
 ```bash
-cargo run -p skob-server -- serve
+make run
 ```
+
+`make help` lists the other targets: reader, writer, S3, tests, Compose, and `psql`. The same process is `cargo run -p skob-server -- serve`.
 
 Defaults: role `all`, HTTP `0.0.0.0:8080`, PostgreSQL `0.0.0.0:5432`, filesystem blobs under `./data`. Override with the `SKOB_*` variables in `.env.example`. `--role` is `all`, `reader`, or `writer`.
 
